@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless patterns - Amazon API Gateway to AWS Lambda to Amazon DynamoDB (uksb-1tthgi812) (tag:apigw-lambda-dynamodb)
+Resources:
+
+
+
+  WeatherApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Auth:
+        DefaultAuthorizer: MyAuthorizer
+        Authorizers:
+          MyAuthorizer:
+            FunctionArn: !GetAtt WeatherLambdaFunction.Arn 
+            Properties:
+              Name: TokenAuthorizer
+              Type: TOKEN
+              IdentitySource: 'method.request.header.Authorization'
+              AuthorizerResultTtlInSeconds: 300
+              
+          MyLambdaTokenAuthorizer:
+            FunctionArn: !GetAtt WeatherLambdaFunction.Arn
+      Cors:
+        AllowMethods: "'OPTIONS,GET,POST,DELETE'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+        AllowOrigin: "'*'"  # Allow any origin
+
+    Models:
+      reqValidatorv2:
+        type: object
+        required:
+          - id
+          - weather
+        properties:
+          id:
+            type: string
+          weather:
+            type: string
+
+
+  WeatherLambdaFunction:
+    Type: AWS::Serverless::Function
+    Description: 'Lambda function inserts data into DynamoDB table'
+    Properties:
+      FunctionName: WeatherFunction
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Policies:
+        DynamoDBCrudPolicy:
+          TableName: !Ref DynamoDBTable
+      Events:
+        WeatherInp:
+          Type: Api
+          Properties:
+            Path: /
+            Method: post
+            RestApiId: !Ref WeatherApi
+            Auth:
+              Authorizer: MyAuthorizer
+             
+  DeleteLambdaFunction:
+    Type: AWS::Serverless::Function
+    Description: 'Lambda function deletes data from DynamoDB table'
+    Properties:
+      FunctionName: DeleteWeatherFunction
+      Handler: delete_lambda.delete_record
+      Runtime: python3.12
+      CodeUri: src/
+      Policies:
+        DynamoDBCrudPolicy:
+          TableName: !Ref DynamoDBTable
+      Events:
+        DeleteEvent:
+          Type: Api
+          RestApiId: !Ref WeatherApi
+          Properties:
+            Path: /
+            Method: DELETE
+
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      TableName: WeatherData
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+Outputs:
+  EndpointUrl:
+    Description: 'HTTP REST endpoint URL'
+    Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod'
